@@ -35,9 +35,24 @@ INPUT_DIR = REPO_ROOT / "input"
 def find_input_zip() -> Path | None:
     if not INPUT_DIR.exists():
         return None
-    for p in INPUT_DIR.iterdir():
-        if p.is_file() and p.suffix.lower() == ".zip":
-            return p
+    # Prefer the explicitly named M Mart Pro source archive. The input
+    # folder may contain unrelated ZIPs from earlier builds; never select
+    # one based on filesystem iteration order.
+    preferred = INPUT_DIR / "MMartPro_SourceCode.zip"
+    if preferred.is_file():
+        return preferred
+    candidates = sorted(
+        p for p in INPUT_DIR.iterdir()
+        if p.is_file() and p.suffix.lower() == ".zip"
+    )
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        names = ", ".join(p.name for p in candidates)
+        raise RuntimeError(
+            "Multiple ZIP files found in input/ and no MMartPro_SourceCode.zip. "
+            f"Pass --path explicitly. Candidates: {names}"
+        )
     return None
 
 
