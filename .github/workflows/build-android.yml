@@ -97,6 +97,7 @@ jobs:
       # 3. Acquire source ZIP
       - name: Acquire source ZIP
         id: acquire
+        shell: bash
         run: |
           python3 scripts/acquire_zip.py \
             --source "${{ inputs.zip_source || 'input-directory' }}" \
@@ -107,6 +108,7 @@ jobs:
       # 4. Extract ZIP
       - name: Extract source ZIP
         id: extract
+        shell: bash
         run: |
           python3 scripts/extract_zip.py \
             --zip "${{ steps.acquire.outputs.zip_path }}"
@@ -114,6 +116,7 @@ jobs:
       # 5. Detect project type
       - name: Detect project type
         id: detect
+        shell: bash
         run: |
           python3 scripts/detect_project.py \
             --root "${{ steps.extract.outputs.project_root }}" \
@@ -126,6 +129,7 @@ jobs:
       # 6. Configure toolchain
       - name: Configure toolchain
         id: toolchain
+        shell: bash
         run: |
           python3 scripts/setup_environment.py \
             --root "${{ steps.extract.outputs.project_root }}" \
@@ -140,6 +144,7 @@ jobs:
       # 7. Self-heal project
       - name: Self-heal project
         id: self_heal
+        shell: bash
         run: |
           python3 scripts/self_heal.py \
             --root "${{ steps.extract.outputs.project_root }}" \
@@ -152,8 +157,7 @@ jobs:
           cat self_heal.json
           echo "::endgroup::"
 
-      # 8. FIX GRADLE VERSION
-      # AGP 9.1.1 requires Gradle 9.3.1 or newer.
+      # 8. Fix Gradle Wrapper version
       - name: Fix Gradle Wrapper version
         shell: bash
         env:
@@ -192,7 +196,6 @@ jobs:
                       found = True
 
                   elif line.strip().startswith("distributionSha256Sum="):
-                      # Old checksum does not match the new distribution.
                       continue
 
                   else:
@@ -304,6 +307,7 @@ jobs:
             --enable-macos-desktop || true
 
       # 12. Restore Gradle cache
+      # Fixed: No hashFiles dependency
       - name: Restore Gradle cache
         if: steps.toolchain.outputs.needs_gradle == 'true'
         uses: actions/cache@v4
@@ -312,23 +316,24 @@ jobs:
             /root/.gradle/caches
             /root/.gradle/wrapper
             ${{ steps.extract.outputs.project_root }}/.gradle
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/build.gradle*', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+          key: gradle-${{ runner.os }}-v1
           restore-keys: |
             gradle-${{ runner.os }}-
             gradle-
 
       # 13. Restore Flutter cache
+      # Fixed: No hashFiles dependency
       - name: Restore Flutter pub cache
         if: steps.toolchain.outputs.needs_flutter == 'true'
         uses: actions/cache@v4
         with:
           path: /root/.pub-cache
-          key: flutter-pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+          key: flutter-pub-${{ runner.os }}-v1
           restore-keys: |
             flutter-pub-${{ runner.os }}-
             flutter-pub-
 
-      # 14. Verify standalone Gradle if wrapper is missing
+      # 14. Verify standalone Gradle
       - name: Verify standalone Gradle
         if: steps.toolchain.outputs.use_wrapper == 'false'
         shell: bash
@@ -372,6 +377,11 @@ jobs:
 
           cat "$GITHUB_WORKSPACE/build.json"
 
+          BUILD_OK=$(python3 -c \
+            "import json; d=json.load(open('$GITHUB_WORKSPACE/build.json')); print(str(d.get('build_succeeded',False)).lower())")
+
+          echo "build_succeeded=$BUILD_OK" >> "$GITHUB_OUTPUT"
+
       # 16. Collect APKs
       - name: Collect APKs
         id: collect
@@ -390,6 +400,18 @@ jobs:
           fi
 
           cat "$GITHUB_WORKSPACE/collect.json"
+
+          APK_COUNT=$(python3 -c \
+            "import json; d=json.load(open('$GITHUB_WORKSPACE/collect.json')); print(d.get('apk_count',0))")
+
+          PRIMARY_APK=$(python3 -c \
+            "import json; d=json.load(open('$GITHUB_WORKSPACE/collect.json')); print(d.get('primary') or '')")
+
+          APK_DIR="$GITHUB_WORKSPACE/output"
+
+          echo "apk_count=$APK_COUNT" >> "$GITHUB_OUTPUT"
+          echo "primary_apk_name=$(basename "$PRIMARY_APK")" >> "$GITHUB_OUTPUT"
+          echo "apk_directory=$APK_DIR" >> "$GITHUB_OUTPUT"
 
       # 17. Upload APK artifact
       - name: Upload APK artifact
@@ -493,6 +515,7 @@ jobs:
             echo "Tag: $TAG"
             echo "Assets uploaded: $UPLOADED"
             echo ""
+
             curl -sS \
               -H "$AUTH_HEADER" \
               -H "$ACCEPT" \
