@@ -93,6 +93,8 @@ NDK_PATTERNS = [
 ]
 
 SDK_PATTERNS = [
+    # New Android Gradle Plugin DSL: compileSdk { version = release(36) { minorApiLevel = 1 } }
+    (r"compileSdk\s*\{\s*version\s*=\s*release\(\s*(\d+)\s*\)", "compile_sdk"),
     (r"compileSdk\s*(?:=|:|\s)\s*(\d+)", "compile_sdk"),
     (r"compileSdkVersion\s+(\d+)", "compile_sdk"),
     (r"targetSdk\s*(?:=|:|\s)\s*(\d+)", "target_sdk"),
