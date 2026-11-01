@@ -20,7 +20,7 @@ on:
         description: "Exact ZIP path relative to repository root"
         required: false
         type: string
-        default: ""
+        default: "input/MMartPro_SourceCode.zip"
 
       zip_url:
         description: "Direct download URL"
@@ -258,16 +258,17 @@ jobs:
 
           echo "Project compileSdk=$COMPILE_SDK"
 
+          # Install the exact platform/build-tools required by M Mart Pro.
+          # SDK 36 is newer than the base Docker image, so this is intentional.
           if [ -n "$COMPILE_SDK" ]; then
-            if [ ! -d "$ANDROID_HOME/platforms/android-$COMPILE_SDK" ]; then
-              echo "Installing Android platform $COMPILE_SDK"
-              yes | sdkmanager "platforms;android-$COMPILE_SDK" || true
-            else
-              echo "Android platform already installed."
+            echo "Installing/verifying Android platform $COMPILE_SDK"
+            yes | sdkmanager "platforms;android-$COMPILE_SDK"
+            if [ "$COMPILE_SDK" = "36" ]; then
+              yes | sdkmanager "build-tools;36.0.0"
             fi
           fi
 
-          yes | sdkmanager "platform-tools" >/dev/null 2>&1 || true
+          yes | sdkmanager "platform-tools"
 
           if [ "$NEEDS_NDK" = "true" ] || \
              [ "${{ inputs.enable_ndk }}" = "true" ]; then
@@ -283,6 +284,26 @@ jobs:
 
             yes | sdkmanager "cmake;3.22.1" >/dev/null 2>&1 || true
           fi
+
+      # 10b. Generate the debug keystore expected by the M Mart Pro Gradle file.
+      # This is the standard Android debug certificate and is only for test APKs.
+      - name: Ensure debug signing keystore
+        shell: bash
+        env:
+          PROJECT_ROOT: ${{ steps.extract.outputs.project_root }}
+        run: |
+          if [ ! -f "$PROJECT_ROOT/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$PROJECT_ROOT/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -s "$PROJECT_ROOT/debug.keystore"
 
       # 11. Switch Flutter version
       - name: Switch Flutter version
