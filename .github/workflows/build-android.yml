@@ -194,10 +194,8 @@ jobs:
                   if line.strip().startswith("distributionUrl="):
                       updated.append(target)
                       found = True
-
                   elif line.strip().startswith("distributionSha256Sum="):
                       continue
-
                   else:
                       updated.append(line)
 
@@ -247,9 +245,32 @@ jobs:
           java -version
 
       # 10. Install Android SDK components
+      # Fixed: Handle SIGPIPE from the yes command safely.
       - name: Install missing Android SDK components
         shell: bash
         run: |
+          set -e
+
+          install_sdk_package() {
+            PACKAGE="$1"
+
+            echo "Installing SDK package: $PACKAGE"
+
+            set +e
+            yes | sdkmanager "$PACKAGE"
+            PIPE_STATUS=("${PIPESTATUS[@]}")
+            set -e
+
+            SDK_STATUS="${PIPE_STATUS[1]:-1}"
+
+            if [ "$SDK_STATUS" -ne 0 ]; then
+              echo "::error::SDK installation failed: $PACKAGE"
+              return "$SDK_STATUS"
+            fi
+
+            echo "Successfully installed: $PACKAGE"
+          }
+
           NEEDS_NDK="${{ steps.toolchain.outputs.needs_ndk }}"
           NDK_VER="${{ steps.toolchain.outputs.ndk_version }}"
 
@@ -258,17 +279,15 @@ jobs:
 
           echo "Project compileSdk=$COMPILE_SDK"
 
-          # Install the exact platform/build-tools required by M Mart Pro.
-          # SDK 36 is newer than the base Docker image, so this is intentional.
           if [ -n "$COMPILE_SDK" ]; then
-            echo "Installing/verifying Android platform $COMPILE_SDK"
-            yes | sdkmanager "platforms;android-$COMPILE_SDK"
+            install_sdk_package "platforms;android-$COMPILE_SDK"
+
             if [ "$COMPILE_SDK" = "36" ]; then
-              yes | sdkmanager "build-tools;36.0.0"
+              install_sdk_package "build-tools;36.0.0"
             fi
           fi
 
-          yes | sdkmanager "platform-tools"
+          install_sdk_package "platform-tools"
 
           if [ "$NEEDS_NDK" = "true" ] || \
              [ "${{ inputs.enable_ndk }}" = "true" ]; then
@@ -276,17 +295,15 @@ jobs:
             if [ -n "$NDK_VER" ] && \
                [ ! -d "$ANDROID_HOME/ndk/$NDK_VER" ]; then
 
-              echo "Installing NDK $NDK_VER"
-
-              yes | sdkmanager "ndk;$NDK_VER" || \
-                echo "WARNING: NDK installation failed"
+              install_sdk_package "ndk;$NDK_VER"
             fi
 
-            yes | sdkmanager "cmake;3.22.1" >/dev/null 2>&1 || true
+            install_sdk_package "cmake;3.22.1"
           fi
 
-      # 10b. Generate the debug keystore expected by the M Mart Pro Gradle file.
-      # This is the standard Android debug certificate and is only for test APKs.
+          echo "Android SDK installation completed successfully."
+
+      # 10b. Generate debug keystore
       - name: Ensure debug signing keystore
         shell: bash
         env:
@@ -303,6 +320,7 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+
           test -s "$PROJECT_ROOT/debug.keystore"
 
       # 11. Switch Flutter version
@@ -328,7 +346,6 @@ jobs:
             --enable-macos-desktop || true
 
       # 12. Restore Gradle cache
-      # Fixed: No hashFiles dependency
       - name: Restore Gradle cache
         if: steps.toolchain.outputs.needs_gradle == 'true'
         uses: actions/cache@v4
@@ -343,7 +360,6 @@ jobs:
             gradle-
 
       # 13. Restore Flutter cache
-      # Fixed: No hashFiles dependency
       - name: Restore Flutter pub cache
         if: steps.toolchain.outputs.needs_flutter == 'true'
         uses: actions/cache@v4
